@@ -1,0 +1,110 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Users\\\u041D\u0438\u043A\u0438\u0442\u0430\\Documents\\GitHub\\DivineDivinity_ScriptEditor\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{349E8F8D-7F55-499B-8529-23BE9F9D7136}|StoryEditor\\StoryEditor.csproj|c:\\users\\\u043D\u0438\u043A\u0438\u0442\u0430\\documents\\github\\divinedivinity_scripteditor\\storyeditor\\mainform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{349E8F8D-7F55-499B-8529-23BE9F9D7136}|StoryEditor\\StoryEditor.csproj|solutionrelative:storyeditor\\mainform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{349E8F8D-7F55-499B-8529-23BE9F9D7136}|StoryEditor\\StoryEditor.csproj|c:\\users\\\u043D\u0438\u043A\u0438\u0442\u0430\\documents\\github\\divinedivinity_scripteditor\\storyeditor\\storyeditor.csproj||{04B8AB82-A572-4FEF-95CE-5222444B6B64}|",
+      "RelativeMoniker": "D:0:0:{349E8F8D-7F55-499B-8529-23BE9F9D7136}|StoryEditor\\StoryEditor.csproj|solutionrelative:storyeditor\\storyeditor.csproj||{04B8AB82-A572-4FEF-95CE-5222444B6B64}|"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{349E8F8D-7F55-499B-8529-23BE9F9D7136}|StoryEditor\\StoryEditor.csproj|c:\\users\\\u043D\u0438\u043A\u0438\u0442\u0430\\documents\\github\\divinedivinity_scripteditor\\storyeditor\\addrule.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{349E8F8D-7F55-499B-8529-23BE9F9D7136}|StoryEditor\\StoryEditor.csproj|solutionrelative:storyeditor\\addrule.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{349E8F8D-7F55-499B-8529-23BE9F9D7136}|StoryEditor\\StoryEditor.csproj|C:\\Users\\\u041D\u0438\u043A\u0438\u0442\u0430\\Documents\\GitHub\\DivineDivinity_ScriptEditor\\storyeditor\\mainform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form",
+      "RelativeMoniker": "D:0:0:{349E8F8D-7F55-499B-8529-23BE9F9D7136}|StoryEditor\\StoryEditor.csproj|solutionrelative:storyeditor\\mainform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{349E8F8D-7F55-499B-8529-23BE9F9D7136}|StoryEditor\\StoryEditor.csproj|C:\\Users\\\u041D\u0438\u043A\u0438\u0442\u0430\\Documents\\GitHub\\DivineDivinity_ScriptEditor\\storyeditor\\addrule.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form",
+      "RelativeMoniker": "D:0:0:{349E8F8D-7F55-499B-8529-23BE9F9D7136}|StoryEditor\\StoryEditor.csproj|solutionrelative:storyeditor\\addrule.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 4,
+          "Children": [
+            {
+              "$type": "Bookmark",
+              "Name": "ST:128:0:{116d2292-e37d-41cd-a077-ebacac4c8cc4}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{b1e99781-ab81-11d0-b683-00aa00a3ee26}"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "MainForm.cs [\u041A\u043E\u043D\u0441\u0442\u0440\u0443\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435]",
+              "DocumentMoniker": "C:\\Users\\\u041D\u0438\u043A\u0438\u0442\u0430\\Documents\\GitHub\\DivineDivinity_ScriptEditor\\StoryEditor\\MainForm.cs",
+              "RelativeDocumentMoniker": "StoryEditor\\MainForm.cs",
+              "ToolTip": "C:\\Users\\\u041D\u0438\u043A\u0438\u0442\u0430\\Documents\\GitHub\\DivineDivinity_ScriptEditor\\StoryEditor\\MainForm.cs [\u041A\u043E\u043D\u0441\u0442\u0440\u0443\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435]",
+              "RelativeToolTip": "StoryEditor\\MainForm.cs [\u041A\u043E\u043D\u0441\u0442\u0440\u0443\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435]",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-01-05T14:16:44.148Z",
+              "EditorCaption": " [\u041A\u043E\u043D\u0441\u0442\u0440\u0443\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435]"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 4,
+              "Title": "AddRule.cs [\u041A\u043E\u043D\u0441\u0442\u0440\u0443\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435]",
+              "DocumentMoniker": "C:\\Users\\\u041D\u0438\u043A\u0438\u0442\u0430\\Documents\\GitHub\\DivineDivinity_ScriptEditor\\StoryEditor\\AddRule.cs",
+              "RelativeDocumentMoniker": "StoryEditor\\AddRule.cs",
+              "ToolTip": "C:\\Users\\\u041D\u0438\u043A\u0438\u0442\u0430\\Documents\\GitHub\\DivineDivinity_ScriptEditor\\StoryEditor\\AddRule.cs [\u041A\u043E\u043D\u0441\u0442\u0440\u0443\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435]",
+              "RelativeToolTip": "StoryEditor\\AddRule.cs [\u041A\u043E\u043D\u0441\u0442\u0440\u0443\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435]",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-01-05T18:00:31.588Z",
+              "EditorCaption": " [\u041A\u043E\u043D\u0441\u0442\u0440\u0443\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435]"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "MainForm.cs",
+              "DocumentMoniker": "C:\\Users\\\u041D\u0438\u043A\u0438\u0442\u0430\\Documents\\GitHub\\DivineDivinity_ScriptEditor\\StoryEditor\\MainForm.cs",
+              "RelativeDocumentMoniker": "StoryEditor\\MainForm.cs",
+              "ToolTip": "C:\\Users\\\u041D\u0438\u043A\u0438\u0442\u0430\\Documents\\GitHub\\DivineDivinity_ScriptEditor\\StoryEditor\\MainForm.cs",
+              "RelativeToolTip": "StoryEditor\\MainForm.cs",
+              "ViewState": "AQIAAJIAAAAAAAAAAAAiwKQAAAAMAAAA",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-01-05T14:10:18.119Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "AddRule.cs",
+              "DocumentMoniker": "C:\\Users\\\u041D\u0438\u043A\u0438\u0442\u0430\\Documents\\GitHub\\DivineDivinity_ScriptEditor\\StoryEditor\\AddRule.cs",
+              "RelativeDocumentMoniker": "StoryEditor\\AddRule.cs",
+              "ToolTip": "C:\\Users\\\u041D\u0438\u043A\u0438\u0442\u0430\\Documents\\GitHub\\DivineDivinity_ScriptEditor\\StoryEditor\\AddRule.cs",
+              "RelativeToolTip": "StoryEditor\\AddRule.cs",
+              "ViewState": "AQIAAKcAAAAAAAAAAAAwwCgAAAA4AAAA",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-01-05T18:31:53.499Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "StoryEditor",
+              "DocumentMoniker": "C:\\Users\\\u041D\u0438\u043A\u0438\u0442\u0430\\Documents\\GitHub\\DivineDivinity_ScriptEditor\\StoryEditor\\StoryEditor.csproj",
+              "RelativeDocumentMoniker": "StoryEditor\\StoryEditor.csproj",
+              "ToolTip": "C:\\Users\\\u041D\u0438\u043A\u0438\u0442\u0430\\Documents\\GitHub\\DivineDivinity_ScriptEditor\\StoryEditor\\StoryEditor.csproj",
+              "RelativeToolTip": "StoryEditor\\StoryEditor.csproj",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000758|",
+              "WhenOpened": "2025-01-17T17:05:22.651Z",
+              "EditorCaption": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

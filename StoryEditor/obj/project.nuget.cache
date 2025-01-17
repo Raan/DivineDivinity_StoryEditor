@@ -1,8 +1,10 @@
 {
   "version": 2,
-  "dgSpecHash": "dMco37t2OxHPnX6y8cpGsSoBlLYf6xfoBSGTw//HQ3MMc6l61qiqGg29D51z5/WJvGMBLW6Wi/W2QMyuMLw6ww==",
+  "dgSpecHash": "Lpksc5g0PXE=",
   "success": true,
-  "projectFilePath": "C:\\Users\\Никита\\source\\repos\\StoryEditor\\StoryEditor\\StoryEditor.csproj",
-  "expectedPackageFiles": [],
+  "projectFilePath": "C:\\Users\\Никита\\Documents\\GitHub\\DivineDivinity_ScriptEditor\\StoryEditor\\StoryEditor.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Никита\\.nuget\\packages\\microsoft.windows.sdk.net.ref\\10.0.22621.31\\microsoft.windows.sdk.net.ref.10.0.22621.31.nupkg.sha512"
+  ],
   "logs": []
 }
