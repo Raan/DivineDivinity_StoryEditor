@@ -4,7 +4,7 @@
 
 It combines a WPF editor, a binary Story decompiler, and a build workflow based on the original 32-bit OsirisDLL.dll from the user's own game installation.
 
-> **Status:** MVP 1.0.0 release candidate. The maintainer confirmed that a Story rebuilt from decompiled source works in the game. The final single-file package still requires a full end-to-end test after clean extraction.
+> **Status:** MVP 1.0.0. The maintainer tested the Windows x64 artifact produced by GitHub Actions: `story.000` was decompiled, rebuilt, and the rebuilt Story was verified in Divine Divinity. The distributable package with documentation is being prepared for a final clean-extraction check.
 
 [Русская версия / Russian version](README.ru.md)
 
@@ -158,7 +158,7 @@ The old internal C# namespaces retain the StoryEditor2 prefix for compatibility.
 - Automatic Steam/GOG installation discovery is bounded to known locations and registry/library metadata. It has not been verified on every store configuration.
 - This MVP does not include every feature from the older WinForms editor.
 - The published desktop application targets Windows x64. The Osiris DLL build host remains 32-bit.
-- A clean-machine end-to-end test of the final GitHub release archive is still required.
+- A clean-machine end-to-end test of the final GitHub Release archive is still recommended before announcing the release.
 
 ## Safety and compatibility
 
