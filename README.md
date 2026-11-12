@@ -2,6 +2,8 @@
 
 **StoryEditor** is a Windows desktop tool for inspecting, decompiling, editing, and rebuilding the Osiris Story data used by the classic game **Divine Divinity**.
 
+![StoryEditor main window](docs/images/main-window.png)
+
 It combines a WPF editor, a binary Story decompiler, and a build workflow based on the original 32-bit OsirisDLL.dll from the user's own game installation.
 
 > **Status:** MVP 1.0.0. The maintainer tested the Windows x64 artifact produced by GitHub Actions: `story.000` was decompiled, rebuilt, and the rebuilt Story was verified in Divine Divinity. The distributable package with documentation is being prepared for a final clean-extraction check.
