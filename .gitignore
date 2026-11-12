@@ -1,0 +1,33 @@
+# .NET build output
+**/bin/
+**/obj/
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.pdb
+*.exe
+*.dll
+*.cache
+*.tmp
+*.bak
+
+# Local application data and logs
+*.log
+*.validation.log
+game-installation.json
+
+# Generated release artifacts
+artifacts/
+publish/
+Release/
+*.zip
+
+# Game binaries and data (never commit copyrighted game files)
+OsirisDLL.dll
+div.exe
+*.000
+*.001
+*.dat
+*.pak

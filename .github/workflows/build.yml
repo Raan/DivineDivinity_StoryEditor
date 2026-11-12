@@ -1,0 +1,36 @@
+name: Build StoryEditor
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore .\StoryEditor.sln
+
+      - name: Build solution
+        run: dotnet build .\StoryEditor.sln -c Release --no-restore
+
+      - name: Publish single-file Windows x64 application
+        run: dotnet publish .\StoryEditor\StoryEditor.csproj -c Release -p:PublishProfile=win-x64
+
+      - name: Upload application artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StoryEditor-win-x64
+          path: StoryEditor/bin/Release/net8.0-windows/win-x64/publish/StoryEditor.exe
+          if-no-files-found: error
