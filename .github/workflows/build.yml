@@ -28,9 +28,29 @@ jobs:
       - name: Publish single-file Windows x64 application
         run: dotnet publish .\StoryEditor\StoryEditor.csproj -c Release -p:PublishProfile=win-x64
 
-      - name: Upload application artifact
+      - name: Assemble distributable package
+        shell: pwsh
+        run: |
+          $publishDir = Join-Path $env:GITHUB_WORKSPACE "StoryEditor\bin\Release\net8.0-windows\win-x64\publish"
+          $packageDir = Join-Path $env:GITHUB_WORKSPACE "artifacts\StoryEditor-1.0.0-win-x64"
+
+          New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
+          Copy-Item (Join-Path $publishDir "StoryEditor.exe") -Destination $packageDir
+
+          Copy-Item @(
+            "README.md",
+            "README.ru.md",
+            "LICENSE",
+            "CHANGELOG.md"
+          ) -Destination $packageDir
+
+          $exePath = Join-Path $packageDir "StoryEditor.exe"
+          $hash = (Get-FileHash -Algorithm SHA256 $exePath).Hash
+          Set-Content -Path (Join-Path $packageDir "SHA256SUMS.txt") -Value "SHA256 (StoryEditor.exe): $hash" -Encoding ascii
+
+      - name: Upload distributable package
         uses: actions/upload-artifact@v4
         with:
-          name: StoryEditor-win-x64
-          path: StoryEditor/bin/Release/net8.0-windows/win-x64/publish/StoryEditor.exe
+          name: StoryEditor-1.0.0-win-x64
+          path: artifacts/StoryEditor-1.0.0-win-x64/*
           if-no-files-found: error
