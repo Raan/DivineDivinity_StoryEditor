@@ -22,15 +22,18 @@ public sealed class OsirisColorizer : DocumentColorizingTransformer
     private static readonly Brush CallBrush = Freeze("#FF6A9955");
     private static readonly Brush SystemBrush = Freeze("#FFC586C0");
     private static readonly Brush OsirisCallBrush = Freeze("#FFD7BA7D");
-    private static readonly Brush CommentBrush = Freeze("#FF6A9955");
+    private static readonly Brush CommentBrush = Freeze("#FF7F9F7F");
     private static readonly Brush OperatorBrush = Freeze("#FFD4D4D4");
+    private static readonly Brush DirectiveBrush = Freeze("#FFD16969");
+    private static readonly Brush DelimiterBrush = Freeze("#FFB4A0D8");
+    private static readonly Brush PunctuationBrush = Freeze("#FF858585");
 
-    private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
+    private static readonly HashSet<string> Keywords = new(StringComparer.OrdinalIgnoreCase)
     {
         "IF", "THEN", "PROC", "AND", "OR", "NOT", "IFF", "INTEGER", "REAL",
         "STRING", "Goal", "INIT", "EXIT", "KB", "SubGoal", "SubGoals",
         "Title", "object", "type", "call", "query", "event", "syscall",
-        "sysquery", "[in]", "[out]"
+        "sysquery", "in", "out"
     };
 
     private static readonly HashSet<string> Builtins = new(StringComparer.Ordinal)
@@ -82,11 +85,18 @@ public sealed class OsirisColorizer : DocumentColorizingTransformer
                    trimmed.StartsWith("/*", StringComparison.Ordinal) ? CommentBrush : null;
         }
         if (token.Kind != TokenKind.Identifier)
-            return token.Text is "==" or "!=" or "<" or ">" or "<=" or ">=" ? OperatorBrush : null;
+        {
+            if (token.Text == "!") return DirectiveBrush;
+            if (token.Text is "{" or "}") return DelimiterBrush;
+            if (token.Text is "(" or ")" or "[" or "]" or "," or ";" or "." or ":") return PunctuationBrush;
+            if (token.Text is "==" or "!=" or "<" or ">" or "<=" or ">=" or "=" or "+" or "-" or "*" or "/")
+                return OperatorBrush;
+            return null;
+        }
 
         if (token.Text.StartsWith("_", StringComparison.Ordinal)) return VariableBrush;
-        if (Keywords.Contains(token.Text)) return KeywordBrush;
         if (Builtins.Contains(token.Text)) return BuiltinBrush;
+        if (Keywords.Contains(token.Text)) return KeywordBrush;
         if (_symbols?.Types.Contains(token.Text) == true) return TypeBrush;
         if (_symbols?.Objects.Contains(token.Text) == true) return ObjectBrush;
         if (_symbols?.Functions.TryGetValue(token.Text, out var kind) == true)

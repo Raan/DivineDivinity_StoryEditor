@@ -6,7 +6,7 @@
 
 It combines a WPF editor, a binary Story decompiler, and a build workflow based on the original 32-bit OsirisDLL.dll from the user's own game installation.
 
-> **Status:** MVP 1.0.0. The maintainer tested the Windows x64 artifact produced by GitHub Actions: `story.000` was decompiled, rebuilt, and the rebuilt Story was verified in Divine Divinity. The distributable package with documentation is being prepared for a final clean-extraction check.
+> **Status:** v1.1.0 is the current release. This version adds a live Osiris grammar validator, navigation from diagnostics, improved rule editing, editor assistance, and bilingual syntax help.
 
 [Русская версия / Russian version](README.ru.md)
 
@@ -14,7 +14,12 @@ It combines a WPF editor, a binary Story decompiler, and a build workflow based 
 
 - **Binary decompilation:** read Story binaries (.000 / .001) and reconstruct editable .div source.
 - **Goal navigation:** browse the Goal hierarchy and inspect INIT, KB, and EXIT sections.
-- **Rule editing:** inspect IF and PROC rules, edit conditions and actions, and validate structural changes before applying them.
+- **Lifecycle editing:** edit INIT and EXIT action lists across Goals, with syntax and declared API signature checks.
+- **Rule editing:** inspect IF and PROC rules, edit conditions and actions in a source-oriented editor, and validate structural changes before applying them.
+- **Grammar validation:** continuously validate the complete Story source, including unsaved edits, with diagnostics for lexical, structural, rule, and INIT/EXIT syntax issues.
+- **Editor assistance:** insert API actions and Story procedures from context menus, use symbol-aware autocomplete, and highlight matching brackets.
+- **Bilingual help:** built-in Osiris syntax reference with English and Russian language switching.
+- **Syntax highlighting:** consistent token coloring in all three KB, INIT, and EXIT editors, including Osiris keywords, literals, variables, objects, API function kinds, directives, and comments.
 - **Source preservation:** retain untouched source text, whitespace, comments, and formatting where possible.
 - **Cross-references:** search rules and usages across Goals.
 - **Symbol Explorer:** inspect declared API symbols, Story procedures, and unresolved call candidates.
@@ -75,7 +80,7 @@ The input binary is read-only and is never modified.
 ### 2. Inspect and edit
 
 - Select a Goal in the hierarchy.
-- Switch between INIT, KB, and EXIT.
+- Switch between INIT, KB, and EXIT. All three sections can be edited; INIT/EXIT changes are retained when switching between Goals. Syntax highlighting uses the same color scheme in all three editors.
 - Use the rule list to navigate to IF and PROC rules.
 - Use Cross References, Goal Links, and Symbol Explorer to inspect relationships and usages.
 - Apply rule edits through the editor's validation workflow.
@@ -95,17 +100,13 @@ By default, build outputs are placed under:
 
 The output must be a separate file. StoryEditor refuses to overwrite its input files and does not automatically install a build into the game directory. Back up game data before manually replacing anything.
 
-## Output and diagnostics
+## Grammar validation and output
 
-The **Output / diagnostics** panel shows a compact summary of the selected Goal's KB:
+The **Grammar** panel validates the complete current Story source in the background, including unsaved edits. It reports lexical, structural, IF/PROC rule, and INIT/EXIT syntax diagnostics. Double-click a diagnostic to navigate to its source location. The check is debounced while editing and does not block the UI.
 
-- IF / PROC rule counts;
-- condition and action counts;
-- function-call count;
-- calls matching declared API symbols;
-- parser diagnostic count and details, when present.
+The separate **Output** panel is used for build and operation messages. The Grammar summary includes rule, condition, KB action, and INIT/EXIT statement counts.
 
-Unknown or unresolved call names are review candidates, **not automatically syntax errors**. The complete list is available in **Symbol Explorer → Unresolved calls**. The parser is conservative and does not yet provide complete Osiris semantic or argument-type validation.
+Unknown or unresolved call names are review candidates, **not automatically syntax errors**; INIT/EXIT may contain Story-defined facts. The complete list is available in **Symbol Explorer → Unresolved calls**. INIT/EXIT validation checks action syntax and known API call arity plus obvious literal/object type mismatches. The validator remains conservative and does not provide complete Osiris semantic or expression type validation.
 
 ## Standalone decompiler CLI
 
@@ -142,15 +143,27 @@ The build scripts are embedded in the executable. When a build is requested, Sto
     StoryEditor/
       WPF application, UI, game installation settings, and publish profile
     StoryEditor.Core/
-      Lexer, source structure parser, Goal catalog, and rule parser
+      Lexer, source structure and lifecycle-action parsers, Goal catalog, API signatures, and rule parser
+    StoryEditor.RegressionTests/
+      Package-free parser and binary Story regression test runner
     StoryDecompiler.Core/
       Shared binary reader, Rete reconstruction, and DIV source generator
     StoryDecompiler/
       Standalone command-line decompiler
     scripts/
       PowerShell source files embedded into the WPF application
+    docs/research/
+      Reverse-engineering notes and the Osiris DBase inventory (680 records)
 
 The old internal C# namespaces retain the StoryEditor2 prefix for compatibility. The user-facing product, assembly, and executable are named **StoryEditor**.
+
+## Research notes
+
+- [Osiris DBase map](docs/research/osiris-dbase-map.md) - 680 typed databases, direct fact mappings, schemas, tuple counts, and validation notes.
+- [Osiris DBase lineage report](docs/research/osiris-dbase-lineage.md) - Rete ownership and upstream function lineage for all 680 databases.
+- [Osiris DBase lineage CSV](docs/research/osiris-dbase-lineage.csv) - one row per database with its direct owner and upstream functions.
+- [Osiris INIT/EXIT audit](docs/research/osiris-init-exit-audit.md) - counts, decompiler coverage, source comparison, and current editor limitations.
+- [Osiris DBase CSV inventory](docs/research/osiris-dbase-map.csv) - one row per database, including an example tuple where available.
 
 ## Known limitations
 

@@ -1,0 +1,18 @@
+Goal(9001).Title("Trivia preservation regression");
+Goal(9001) {
+    KB {
+        IF
+            FirstCondition(1)
+
+            // comment belongs to the second condition
+            AND NOT SecondCondition(2)
+            AND
+            ThirdCondition(3)
+        THEN
+            FirstAction(1);
+
+            /* comment belongs to the second action */
+            SecondAction(2);
+            ThirdAction(3);
+    }
+}

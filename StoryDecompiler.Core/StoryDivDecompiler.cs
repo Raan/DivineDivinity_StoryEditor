@@ -7,8 +7,6 @@ internal sealed record StoryDivDecompileResult(
     string Text,
     int RuleCount,
     int GoalCount,
-    int InferredPrototypeCount,
-    int InferredParameterCount,
     int UnassignedRuleCount,
     IReadOnlyList<string> Diagnostics);
 
@@ -85,21 +83,18 @@ internal static class StoryDivDecompiler
         public StoryFunctionRecord? HeaderFunction { get; init; }
         public bool IsProc => HeaderFunction?.FunctionKind == 5;
         public HashSet<int> ProcVariableIds { get; } = [];
-        public Dictionary<int, InferredProcParameter> InferredSlots { get; } = [];
     }
 
-    private sealed record InferredProcParameter(int Slot, uint Type, int LocalVariableIndex);
-
-    private sealed record ProcCandidate(
-        RuleContext Context,
-        StoryAdaptorRecord Adaptor,
-        IReadOnlyList<int> MissingSlots);
 
     public static StoryDivDecompileResult Decompile(StoryReteDump dump)
     {
         ArgumentNullException.ThrowIfNull(dump);
 
         var diagnostics = new List<string>();
+        if (HasLikelySavePaddedAdaptorMappings(dump.Adaptors))
+        {
+            diagnostics.Add("Rete adaptor mappings appear to have been zero-padded to five columns by Osiris Load/Save. Some original trailing argument counts cannot be recovered unambiguously from this saved story; KB argument text is best-effort.");
+        }
         if (dump.RemainingBytes != 0)
             diagnostics.Add($"The binary parser left {dump.RemainingBytes} unread byte(s).");
 
@@ -164,17 +159,12 @@ internal static class StoryDivDecompiler
 
             if (context.IsProc && adaptorMap.TryGetValue(headerAdaptorId, out StoryAdaptorRecord? headerAdaptor))
             {
-                foreach (byte variableId in headerAdaptor.ArgumentVariableIds)
-                {
-                    if (variableId != byte.MaxValue)
-                        context.ProcVariableIds.Add(variableId);
-                }
+                foreach (int variableId in GetUsedProcVariableIds(headerAdaptor))
+                    context.ProcVariableIds.Add(variableId);
             }
 
             contexts.Add(context);
         }
-
-        InferProcPrototypes(contexts, adaptorMap, diagnostics);
 
         var rulesByGoal = contexts
             .GroupBy(x => x.GoalId)
@@ -188,9 +178,13 @@ internal static class StoryDivDecompiler
         output.Append("version \"").Append(EscapeQuotedString(dump.CompilerVersion)).AppendLine("\"");
         output.AppendLine();
 
+        // DBases are the current Osiris fact-store snapshot, not source declarations.
+        // Re-emitting those live tuples as INIT actions would duplicate runtime state.
         RenderGoals(output, dump.Goals, rulesByGoal, nodeMap, adaptorMap, functionMap, diagnostics);
         RenderGoalHierarchy(output, dump.Goals);
 
+        // Keep the separate file-level action list visible as a diagnostic until its
+        // source-language representation is independently established.
         if (dump.GlobalActions.Count > 0)
             diagnostics.Add($"The binary contains {dump.GlobalActions.Count} global action(s); this section is not emitted yet.");
 
@@ -198,8 +192,6 @@ internal static class StoryDivDecompiler
             output.ToString(),
             contexts.Count,
             dump.Goals.Count,
-            contexts.Where(x => x.InferredSlots.Count > 0).Select(x => x.HeaderFunction!.NodeId).Distinct().Count(),
-            contexts.Sum(x => x.InferredSlots.Count),
             unassigned,
             diagnostics);
     }
@@ -293,114 +285,18 @@ internal static class StoryDivDecompiler
         return false;
     }
 
-    private static void InferProcPrototypes(
-        IReadOnlyList<RuleContext> contexts,
-        IReadOnlyDictionary<uint, StoryAdaptorRecord> adaptorMap,
-        List<string> diagnostics)
-    {
-        foreach (var group in contexts
-                     .Where(x => x.IsProc)
-                     .GroupBy(x => x.HeaderFunction!.NodeId))
-        {
-            var procRules = group.ToList();
-
-            if (procRules.Any(context =>
-                    adaptorMap.TryGetValue(context.HeaderAdaptorId, out StoryAdaptorRecord? adaptor) &&
-                    GetMissingProcSlots(adaptor).Count == 0))
-            {
-                continue;
-            }
-
-            var candidates = new List<ProcCandidate>();
-            foreach (var context in procRules)
-            {
-                if (!adaptorMap.TryGetValue(context.HeaderAdaptorId, out StoryAdaptorRecord? adaptor))
-                    continue;
-
-                IReadOnlyList<int> missing = GetMissingProcSlots(adaptor);
-                if (missing.Count > 0)
-                    candidates.Add(new ProcCandidate(context, adaptor, missing));
-            }
-
-            candidates = candidates
-                .OrderBy(x => x.MissingSlots.Count)
-                .ThenByDescending(x => x.Context.ActionNode.LocalVariables?.Count ?? 0)
-                .ToList();
-
-            bool inferred = false;
-            foreach (ProcCandidate candidate in candidates)
-            {
-                StoryFunctionRecord function = candidate.Context.HeaderFunction!;
-                var usedLocalVariables = candidate.Adaptor.ArgumentVariableIds
-                    .Where(x => x != byte.MaxValue)
-                    .Select(x => (int)x)
-                    .ToHashSet();
-
-                var assignments = new List<InferredProcParameter>();
-                bool complete = true;
-
-                foreach (int slot in candidate.MissingSlots)
-                {
-                    if (slot >= function.TypeValues.Length)
-                    {
-                        complete = false;
-                        break;
-                    }
-
-                    uint wantedType = function.TypeValues[slot];
-                    StoryLocalVariable? local = candidate.Context.ActionNode.LocalVariables?
-                        .OrderBy(x => x.LocalVariableIndex)
-                        .FirstOrDefault(x =>
-                            x.Value.Type == wantedType &&
-                            !usedLocalVariables.Contains(x.LocalVariableIndex));
-
-                    if (local is null)
-                    {
-                        complete = false;
-                        break;
-                    }
-
-                    usedLocalVariables.Add(local.LocalVariableIndex);
-                    assignments.Add(new InferredProcParameter(slot, wantedType, local.LocalVariableIndex));
-                }
-
-                if (!complete || assignments.Count != candidate.MissingSlots.Count)
-                    continue;
-
-                foreach (InferredProcParameter assignment in assignments)
-                {
-                    candidate.Context.InferredSlots[assignment.Slot] = assignment;
-                    candidate.Context.ProcVariableIds.Add(assignment.LocalVariableIndex);
-                }
-
-                inferred = true;
-                break;
-            }
-
-            if (!inferred)
-            {
-                diagnostics.Add(
-                    $"PROC {procRules[0].HeaderNode.Name} (function node {group.Key}) has no complete typed prototype inferable from local variables.");
-            }
-        }
-    }
-
-    private static IReadOnlyList<int> GetMissingProcSlots(StoryAdaptorRecord adaptor)
-    {
-        var literalSlots = adaptor.LiteralPairs
-            .Select(x => (int)x.ColumnIndex)
+    // Osiris Load/Save pads every adaptor mapping vector to a five-byte boundary.
+    // This global signature distinguishes saved histories from the original startup story.
+    internal static bool HasLikelySavePaddedAdaptorMappings(IReadOnlyList<StoryAdaptorRecord> adaptors) =>
+        adaptors.Count >= 1_000 &&
+        adaptors.All(x => x.ArgumentVariableIds.Length % 5 == 0) &&
+        adaptors.Count(x => x.ArgumentVariableIds.Length > 0 && x.ArgumentVariableIds[^1] == 0) > adaptors.Count / 2;
+    // The binding table stores unique variable IDs; wildcard 255 is intentionally absent.
+    // Using it instead of scanning the mapping avoids treating zero-fill as _Var1.
+    internal static HashSet<int> GetUsedProcVariableIds(StoryAdaptorRecord adaptor) =>
+        adaptor.VariableBindings
+            .Select(x => (int)x.VariableId)
             .ToHashSet();
-
-        var missing = new List<int>();
-        for (int slot = 0; slot < adaptor.ArgumentVariableIds.Length; slot++)
-        {
-            if (adaptor.ArgumentVariableIds[slot] == byte.MaxValue && !literalSlots.Contains(slot))
-                missing.Add(slot);
-        }
-
-        return missing;
-    }
-
     private static void RenderTypeDeclarations(StringBuilder output)
     {
         foreach (string declaration in TypeDeclarations)
@@ -524,8 +420,16 @@ internal static class StoryDivDecompiler
             }
             else
             {
+                var reservedVariableIds = context.ActionNode.LocalVariables?
+                    .Select(variable => variable.LocalVariableIndex)
+                    .ToHashSet() ?? new HashSet<int>();
+                reservedVariableIds.UnionWith(context.ProcVariableIds);
                 string[] arguments = RenderAdaptorArguments(
-                    headerAdaptor, context.HeaderFunction, context, isProcHeader: true);
+                    headerAdaptor,
+                    context.HeaderFunction,
+                    context.ProcVariableIds,
+                    isProcHeader: true,
+                    reservedVariableIds);
                 lines.Add(context.HeaderNode.Name + "(" + string.Join(", ", arguments) + ")");
             }
 
@@ -643,21 +547,41 @@ internal static class StoryDivDecompiler
             return $"<MISSING ADAPTOR {adaptorId}>";
 
         functionMap.TryGetValue(node.NodeId, out StoryFunctionRecord? function);
-        string[] arguments = RenderAdaptorArguments(adaptor, function, context, isProcHeader: false);
+        string[] arguments = RenderAdaptorArguments(
+            adaptor,
+            function,
+            context.ProcVariableIds,
+            isProcHeader: false);
         return node.Name + "(" + string.Join(", ", arguments) + ")";
     }
 
-    private static string[] RenderAdaptorArguments(
+    internal static string[] RenderAdaptorArguments(
         StoryAdaptorRecord adaptor,
         StoryFunctionRecord? function,
-        RuleContext context,
-        bool isProcHeader)
+        IReadOnlySet<int> procVariableIds,
+        bool isProcHeader,
+        IReadOnlySet<int>? reservedVariableIds = null)
     {
-        var arguments = new List<string>(adaptor.ArgumentVariableIds.Length);
+        // FunctionKind 5 records carry the authoritative typed PROC signature.
+        // Save-game adaptors may be padded to five columns, so the signature
+        // determines the real PROC arity rather than the padded mapping width.
+        int argumentCount = isProcHeader && function?.FunctionKind == 5
+            ? function.TypeValues.Length
+            : adaptor.ArgumentVariableIds.Length;
 
-        for (int slot = 0; slot < adaptor.ArgumentVariableIds.Length; slot++)
+        var reserved = new HashSet<int>(procVariableIds);
+        if (reservedVariableIds is not null)
+            reserved.UnionWith(reservedVariableIds);
+        foreach (byte id in adaptor.ArgumentVariableIds)
+            if (id != byte.MaxValue)
+                reserved.Add(id);
+
+        var arguments = new List<string>(argumentCount);
+        for (int slot = 0; slot < argumentCount; slot++)
         {
-            byte variableId = adaptor.ArgumentVariableIds[slot];
+            byte variableId = slot < adaptor.ArgumentVariableIds.Length
+                ? adaptor.ArgumentVariableIds[slot]
+                : byte.MaxValue;
             StoryColumnValue? literal = adaptor.LiteralPairs.FirstOrDefault(x => x.ColumnIndex == slot);
 
             if (variableId != byte.MaxValue)
@@ -665,7 +589,7 @@ internal static class StoryDivDecompiler
                 string argument = "_Var" + (variableId + 1).ToString(CultureInfo.InvariantCulture);
                 if (isProcHeader || function?.FunctionKind == 1 ||
                     (function?.FunctionKind == 4 && slot < function.TypeValues.Length &&
-                     function.TypeValues[slot] == 6 && !context.ProcVariableIds.Contains(variableId)))
+                     function.TypeValues[slot] == 6 && !procVariableIds.Contains(variableId)))
                 {
                     if (function is not null && slot < function.TypeValues.Length &&
                         RuleTypeNames.TryGetValue(function.TypeValues[slot], out string? typeName))
@@ -684,11 +608,21 @@ internal static class StoryDivDecompiler
                 continue;
             }
 
-            if (isProcHeader && context.InferredSlots.TryGetValue(slot, out InferredProcParameter? inferred) &&
-                RuleTypeNames.TryGetValue(inferred.Type, out string? inferredTypeName))
+            if (isProcHeader && function?.FunctionKind == 5)
             {
-                arguments.Add("(" + inferredTypeName + ")_Var" +
-                              (slot + 1).ToString(CultureInfo.InvariantCulture));
+                uint typeCode = function.TypeValues[slot];
+                if (!RuleTypeNames.TryGetValue(typeCode, out string? typeName))
+                    throw new InvalidDataException(
+                        $"PROC {function.Name} parameter {slot + 1} has unknown type code {typeCode}.");
+
+                // A typed, unused variable is semantically a wildcard in a PROC
+                // head, but gives the original compiler the parameter type it needs.
+                int syntheticId = Enumerable.Range(0, 255).FirstOrDefault(id => !reserved.Contains(id), -1);
+                if (syntheticId < 0)
+                    throw new InvalidDataException($"PROC {function.Name} has no free variable slot for a typed wildcard.");
+                reserved.Add(syntheticId);
+                arguments.Add("(" + typeName + ")_Var" +
+                    (syntheticId + 1).ToString(CultureInfo.InvariantCulture));
                 continue;
             }
 
@@ -739,7 +673,7 @@ internal static class StoryDivDecompiler
         }
     }
 
-    private static IEnumerable<string> RenderActionList(IReadOnlyList<StoryActionRecord> actions)
+    internal static IEnumerable<string> RenderActionList(IReadOnlyList<StoryActionRecord> actions)
     {
         foreach (StoryActionRecord action in actions)
         {

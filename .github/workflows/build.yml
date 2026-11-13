@@ -25,6 +25,9 @@ jobs:
       - name: Build solution
         run: dotnet build .\StoryEditor.sln -c Release --no-restore
 
+      - name: Run regression tests
+        run: dotnet run --project .\StoryEditor.RegressionTests\StoryEditor.RegressionTests.csproj -c Release --no-build
+
       - name: Publish single-file Windows x64 application
         run: dotnet publish .\StoryEditor\StoryEditor.csproj -c Release -p:PublishProfile=win-x64
 
@@ -32,7 +35,7 @@ jobs:
         shell: pwsh
         run: |
           $publishDir = Join-Path $env:GITHUB_WORKSPACE "StoryEditor\bin\Release\net8.0-windows\win-x64\publish"
-          $packageDir = Join-Path $env:GITHUB_WORKSPACE "artifacts\StoryEditor-1.0.0-win-x64"
+          $packageDir = Join-Path $env:GITHUB_WORKSPACE "artifacts\StoryEditor-1.1.0-win-x64"
 
           New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
           Copy-Item (Join-Path $publishDir "StoryEditor.exe") -Destination $packageDir
@@ -51,6 +54,6 @@ jobs:
       - name: Upload distributable package
         uses: actions/upload-artifact@v6
         with:
-          name: StoryEditor-1.0.0-win-x64
-          path: artifacts/StoryEditor-1.0.0-win-x64/*
+          name: StoryEditor-1.1.0-win-x64
+          path: artifacts/StoryEditor-1.1.0-win-x64/*
           if-no-files-found: error

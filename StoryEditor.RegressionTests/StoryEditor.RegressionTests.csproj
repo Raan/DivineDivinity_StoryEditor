@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="Fixtures\CommentedRules.div" CopyToOutputDirectory="PreserveNewest" />
+    <ProjectReference Include="..\StoryDecompiler.Core\StoryDecompiler.Core.csproj" />
+    <Compile Include="..\StoryEditor.Core\Lexing\*.cs" Link="Lexing\%(Filename)%(Extension)" />
+    <Compile Include="..\StoryEditor.Core\Parsing\ActionListParser.cs" Link="Parsing\ActionListParser.cs" />
+    <Compile Include="..\StoryEditor.Core\Parsing\LifecycleActionListDocument.cs" Link="Parsing\LifecycleActionListDocument.cs" />
+    <Compile Include="..\StoryEditor.Core\Parsing\ApiSymbolCatalog.cs" Link="Parsing\ApiSymbolCatalog.cs" />
+    <Compile Include="..\StoryEditor.Core\Parsing\GoalCatalog.cs" Link="Parsing\GoalCatalog.cs" />
+    <Compile Include="..\StoryEditor.Core\Parsing\RuleParser.cs" Link="Parsing\RuleParser.cs" />
+    <Compile Include="..\StoryEditor.Core\Parsing\OsirisGrammarValidator.cs" Link="Parsing\OsirisGrammarValidator.cs" />
+    <Compile Include="..\StoryEditor.Core\Parsing\StructureParser.cs" Link="Parsing\StructureParser.cs" />
+    <Compile Include="..\StoryEditor.Core\Parsing\SyntaxBlock.cs" Link="Parsing\SyntaxBlock.cs" />
+  </ItemGroup>
+</Project>

@@ -24,8 +24,6 @@ internal static class Program
                 Console.WriteLine($"API functions: {dump.Functions.Count(x => x.FunctionKind is 1 or 2 or 3 or 6 or 7):N0}");
                 Console.WriteLine($"Goals: {result.GoalCount:N0}");
                 Console.WriteLine($"Rules: {result.RuleCount:N0}");
-                Console.WriteLine($"Inferred PROC prototypes: {result.InferredPrototypeCount:N0}");
-                Console.WriteLine($"Inferred PROC parameters: {result.InferredParameterCount:N0}");
                 Console.WriteLine($"Unassigned rules: {result.UnassignedRuleCount:N0}");
                 Console.WriteLine($"Unread binary bytes: {dump.RemainingBytes:N0}");
                 Console.WriteLine($"Output bytes: {new FileInfo(output).Length:N0}");

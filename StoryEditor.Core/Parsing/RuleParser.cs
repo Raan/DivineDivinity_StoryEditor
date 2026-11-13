@@ -6,6 +6,91 @@ public enum RuleKind { If, Proc }
 
 public enum RuleConditionConnector { First, And, AndNot }
 
+/// <summary>
+/// Keeps the editor's NOT state and source-level AND/AND NOT connector in sync.
+/// The first condition uses a leading NOT; subsequent conditions encode negation
+/// in their connector.
+/// </summary>
+public static class RuleConditionSemantics
+{
+    public static RuleConditionConnector ConnectorFor(bool negated, int index) =>
+        index == 0 ? RuleConditionConnector.First :
+        negated ? RuleConditionConnector.AndNot : RuleConditionConnector.And;
+
+    public static bool IsNegated(RuleConditionConnector connector, bool leadingNegated, int index) =>
+        index == 0 ? leadingNegated : connector == RuleConditionConnector.AndNot;
+}
+
+/// <summary>
+/// Captures the exact source text between parsed elements while replacing
+/// structural connectors and separators with movable placeholders.
+/// </summary>
+public static class RuleTriviaPreserver
+{
+    public const string ConnectorMarker = "__STORYEDITOR_CONNECTOR_MARKER__";
+    public const string SeparatorMarker = "__STORYEDITOR_SEPARATOR_MARKER__";
+
+    public static IReadOnlyList<string> ExtractConditionLayouts(
+        string source, IEnumerable<(int Start, int Length)> elementSpans)
+    {
+        var spans = elementSpans.OrderBy(span => span.Start).ToArray();
+        var layouts = Enumerable.Repeat(string.Empty, spans.Length).ToArray();
+        for (int i = 1; i < spans.Length; i++)
+        {
+            int gapStart = spans[i - 1].Start + spans[i - 1].Length;
+            int gapEnd = spans[i].Start;
+            if (gapStart < 0 || gapEnd < gapStart || gapEnd > source.Length)
+                throw new ArgumentOutOfRangeException(nameof(elementSpans));
+
+            string gap = source[gapStart..gapEnd];
+            var tokens = Lexer.Tokenize(gap)
+                .Where(token => token.Kind != TokenKind.Trivia &&
+                    token.Kind != TokenKind.EndOfFile).ToArray();
+            var replacements = new List<(int Start, int Length, string Value)>();
+            for (int t = 0; t < tokens.Length; t++)
+            {
+                if (tokens[t].Text != "AND") continue;
+                if (t + 1 < tokens.Length && tokens[t + 1].Text == "NOT")
+                {
+                    int end = tokens[t + 1].Start + tokens[t + 1].Length;
+                    replacements.Add((tokens[t].Start, end - tokens[t].Start, ConnectorMarker));
+                    t++;
+                }
+                else
+                    replacements.Add((tokens[t].Start, tokens[t].Length, ConnectorMarker));
+                break;
+            }
+            foreach (var replacement in replacements.OrderByDescending(item => item.Start))
+                gap = gap.Remove(replacement.Start, replacement.Length)
+                    .Insert(replacement.Start, replacement.Value);
+            layouts[i] = gap;
+        }
+        return layouts;
+    }
+
+    public static IReadOnlyList<string> ExtractActionLayouts(
+        string source, IEnumerable<(int Start, int Length)> elementSpans)
+    {
+        var spans = elementSpans.OrderBy(span => span.Start).ToArray();
+        var layouts = Enumerable.Repeat(string.Empty, spans.Length).ToArray();
+        for (int i = 1; i < spans.Length; i++)
+        {
+            int gapStart = spans[i - 1].Start + spans[i - 1].Length;
+            int gapEnd = spans[i].Start;
+            if (gapStart < 0 || gapEnd < gapStart || gapEnd > source.Length)
+                throw new ArgumentOutOfRangeException(nameof(elementSpans));
+
+            string gap = source[gapStart..gapEnd];
+            var semicolon = Lexer.Tokenize(gap).FirstOrDefault(token => token.Text == ";");
+            if (semicolon is not null)
+                gap = gap.Remove(semicolon.Start, semicolon.Length)
+                    .Insert(semicolon.Start, SeparatorMarker);
+            layouts[i] = gap;
+        }
+        return layouts;
+    }
+}
+
 public sealed record RuleCondition(string Text, int Start, int Length, bool Negated, RuleConditionConnector Connector = RuleConditionConnector.First);
 public sealed record RuleAction(string Text, int Start, int Length, bool Negated);
 public sealed record CallArgument(string Text, int Start, int Length);
@@ -85,7 +170,8 @@ public sealed class RuleParser
                     }
                 }
 
-                var conditions = SplitConditions(source, tokens, conditionStart, then, diagnostics);
+                var conditions = SplitConditions(source, tokens, conditionStart, then, diagnostics,
+                    kind == RuleKind.Proc);
                 int actionStart = then + 1;
                 int nextRule = FindNextRule(tokens, actionStart, last);
                 int actionEnd = nextRule < 0 ? last : nextRule;
@@ -105,14 +191,30 @@ public sealed class RuleParser
     }
 
     private static IReadOnlyList<RuleCondition> SplitConditions(string source, Token[] t,
-        int start, int end, List<ParseDiagnostic> diagnostics)
+        int start, int end, List<ParseDiagnostic> diagnostics, bool procRule)
     {
         var result = new List<RuleCondition>();
         int segment = start, depth = 0;
         var connector = RuleConditionConnector.First;
         bool negated = false;
 
-        if (segment < end && t[segment].Text == "NOT")
+        // PROC signatures may be followed directly by THEN when the procedure
+        // intentionally has no conditions. IF rules are checked by the grammar validator.
+        if (start >= end)
+            return result;
+
+        if (procRule && segment < end &&
+            string.Equals(t[segment].Text, "AND", StringComparison.OrdinalIgnoreCase))
+        {
+            segment++;
+            if (segment < end &&
+                string.Equals(t[segment].Text, "NOT", StringComparison.OrdinalIgnoreCase))
+            {
+                negated = true;
+                segment++;
+            }
+        }
+        else if (segment < end && t[segment].Text == "NOT")
         {
             negated = true;
             segment++;
@@ -124,10 +226,21 @@ public sealed class RuleParser
             if (value == "(") depth++;
             else if (value == ")") depth--;
 
-            if (depth == 0 && value == "AND")
+            // A missing parenthesis in the current condition must not swallow
+            // every following condition. Osiris commonly places logical
+            // connectors at the beginning of a new line, so accept AND there
+            // as a recovery point even when the previous expression is unbalanced.
+            // The lexer has already removed comments/trivia from this token stream,
+            // therefore connector-like text inside comments is never considered.
+            bool isAnd = string.Equals(value, "AND", StringComparison.OrdinalIgnoreCase);
+            bool lineStartRecovery = depth != 0 && isAnd &&
+                IsFirstTokenOnLine(source, t[i].Start);
+
+            if (isAnd && (depth == 0 || lineStartRecovery))
             {
                 AddCondition(segment, i, negated, connector);
-                bool nextNegated = i + 1 < end && t[i + 1].Text == "NOT";
+                bool nextNegated = i + 1 < end &&
+                    string.Equals(t[i + 1].Text, "NOT", StringComparison.OrdinalIgnoreCase);
                 connector = nextNegated
                     ? RuleConditionConnector.AndNot
                     : RuleConditionConnector.And;
@@ -148,11 +261,34 @@ public sealed class RuleParser
         void AddCondition(int a, int b, bool isNegated, RuleConditionConnector conditionConnector)
         {
             // Keep every token in the condition span, including grouping parentheses.
-            if (a >= b) return;
+            if (a >= b)
+            {
+                int position = a < t.Length ? t[a].Start : source.Length;
+                diagnostics.Add(new ParseDiagnostic("Empty condition around AND connector.", position));
+                return;
+            }
             int s = t[a].Start, e = t[b - 1].End;
             result.Add(new RuleCondition(source[s..e], s, e - s, isNegated, conditionConnector));
         }
     }
+    private static bool IsFirstTokenOnLine(string source, int position)
+    {
+        if (position <= 0 || position > source.Length)
+            return true;
+
+        int lineStart = position - 1;
+        while (lineStart >= 0 && source[lineStart] is not ('\r' or '\n'))
+            lineStart--;
+
+        for (int i = lineStart + 1; i < position; i++)
+        {
+            if (!char.IsWhiteSpace(source[i]))
+                return false;
+        }
+
+        return true;
+    }
+
     private static IReadOnlyList<RuleAction> SplitActions(string source, Token[] t,
         int start, int end, List<ParseDiagnostic> diagnostics)
     {
@@ -227,9 +363,14 @@ public sealed class RuleParser
         int depth = 0;
         for (int i = start; i < end; i++)
         {
+            // THEN is a synchronization point: even if a condition contains an
+            // unmatched opening parenthesis, resume rule parsing at THEN rather
+            // than consuming the rest of the KB as part of that condition.
+            if (t[i].Text == sought && (depth == 0 || sought == "THEN"))
+                return i;
+
             if (t[i].Text == "(") depth++;
             else if (t[i].Text == ")") depth--;
-            else if (depth == 0 && t[i].Text == sought) return i;
         }
         return -1;
     }

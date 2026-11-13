@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
@@ -16,6 +17,7 @@ public partial class MainWindow : Window
 {
     private sealed record EditedSection(int OriginalLength, string Text);
     private sealed record RuleListEntry(string Label, int Start, int Length, OsirisRule Rule, string SearchText);
+    private sealed record GrammarDiagnosticEntry(string Label, GrammarDiagnostic? Diagnostic = null);
     private sealed record CrossReferenceEntry(string Label, int Start, int Length, GoalSymbol Goal, string SearchText, IReadOnlyList<string> Calls, IReadOnlyList<string> ProcedureCalls, string? ProcedureHeadName);
     private sealed record GoalLinkEntry(
         GoalSymbol Goal,
@@ -70,7 +72,17 @@ public partial class MainWindow : Window
     private readonly OsirisColorizer _kbColorizer = new();
     private readonly OsirisColorizer _initColorizer = new();
     private readonly OsirisColorizer _exitColorizer = new();
+    private readonly BracketPairColorizer _kbBracketColorizer = new();
+    private readonly BracketPairColorizer _initBracketColorizer = new();
+    private readonly BracketPairColorizer _exitBracketColorizer = new();
     private readonly DispatcherTimer _highlightTimer;
+    private readonly DispatcherTimer _grammarValidationTimer;
+    private GrammarValidationResult? _grammarValidationResult;
+    private string? _grammarValidationSource;
+    private int _grammarValidationVersion;
+    private int _grammarResultVersion = -1;
+    private bool _grammarValidationRunning;
+    private bool _grammarValidationPending;
     private string? _source;
     private string? _sourcePath;
     private IReadOnlyList<Token> _tokens = Array.Empty<Token>();
@@ -83,13 +95,38 @@ public partial class MainWindow : Window
     private bool _loadingSection;
     private bool _hasStructuralEdits;
 
+    private static string GoalScriptLayoutSettingsPath =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "StoryEditor", "goal-script-layout.json");
+    private bool _goalScriptLayoutRestored;
+
     public MainWindow(string? initialPath)
     {
         InitializeComponent();
+        ContentRendered += (_, _) =>
+        {
+            RestoreGoalScriptLayout();
+            GoalScriptLayoutGrid.UpdateLayout();
+            _goalScriptLayoutRestored = true;
+        };
+        Closing += (_, _) => SaveGoalScriptLayout();
 
         KbEditor.TextArea.TextView.LineTransformers.Add(_kbColorizer);
         InitEditor.TextArea.TextView.LineTransformers.Add(_initColorizer);
         ExitEditor.TextArea.TextView.LineTransformers.Add(_exitColorizer);
+
+        AttachBracketHighlight(KbEditor, _kbBracketColorizer);
+        AttachBracketHighlight(InitEditor, _initBracketColorizer);
+        AttachBracketHighlight(ExitEditor, _exitBracketColorizer);
+
+        // Apply the same Enter behavior to the three editors in the main window.
+        AttachIndentation(KbEditor);
+        AttachIndentation(InitEditor);
+        AttachIndentation(ExitEditor);
+
+        OsirisEditorAssist.Attach(KbEditor, GetApiCompletionSymbols, GetProcedureCompletionSymbols, allowRuleSyntax: true);
+        OsirisEditorAssist.Attach(InitEditor, GetApiCompletionSymbols, GetProcedureCompletionSymbols, lifecycleActions: true);
+        OsirisEditorAssist.Attach(ExitEditor, GetApiCompletionSymbols, GetProcedureCompletionSymbols, lifecycleActions: true);
 
         _highlightTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
         _highlightTimer.Tick += (_, _) =>
@@ -99,6 +136,9 @@ public partial class MainWindow : Window
             RebuildRuleList();
             UpdateCrossReferencesForCurrentGoal();
         };
+
+        _grammarValidationTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(750) };
+        _grammarValidationTimer.Tick += GrammarValidationTimer_Tick;
 
         KbEditor.TextChanged += (_, _) =>
         {
@@ -111,13 +151,202 @@ public partial class MainWindow : Window
 
             SaveButton.IsEnabled = _edits.Count > 0 || _hasStructuralEdits;
             StatusText.Text = _edits.Count == 0 && !_hasStructuralEdits ? "No unsaved changes" :
-                $"Unsaved KB edits: {_edits.Count} Goal section(s)";
+                $"Unsaved edits: {_edits.Count} section(s)";
             _highlightTimer.Stop();
             _highlightTimer.Start();
+            QueueGrammarValidation();
         };
 
+        InitEditor.TextChanged += (_, _) => TrackLifecycleSectionEdit(InitEditor, SyntaxKind.InitSection);
+        ExitEditor.TextChanged += (_, _) => TrackLifecycleSectionEdit(ExitEditor, SyntaxKind.ExitSection);
+
+        // Open a document only when an explicit command-line path was supplied.
         if (!string.IsNullOrWhiteSpace(initialPath) && File.Exists(initialPath))
             LoadDocument(initialPath);
+    }
+
+    private static void AttachBracketHighlight(
+        TextEditor editor, BracketPairColorizer colorizer)
+    {
+        editor.TextArea.TextView.LineTransformers.Add(colorizer);
+
+        void Refresh()
+        {
+            colorizer.Update(editor.Text, editor.CaretOffset);
+            editor.TextArea.TextView.Redraw();
+        }
+
+        editor.TextChanged += (_, _) => Refresh();
+        editor.TextArea.Caret.PositionChanged += (_, _) => Refresh();
+        editor.Loaded += (_, _) => Refresh();
+    }
+
+    private IEnumerable<OsirisCompletionSymbol> GetApiCompletionSymbols()
+    {
+        if (_api is null)
+            yield break;
+
+        foreach (var pair in _api.Functions)
+        {
+            string signature = _api.FunctionSignatures.TryGetValue(pair.Key, out var apiSignature)
+                ? "(" + string.Join(", ", apiSignature.Parameters.Select(parameter =>
+                    $"[{parameter.Direction}] {parameter.Type}")) + ")"
+                : "()";
+            yield return new OsirisCompletionSymbol(
+                pair.Key,
+                pair.Value.ToString(),
+                signature,
+                "Declared in the Osiris API catalog.");
+        }
+    }
+
+    private IEnumerable<OsirisCompletionSymbol> GetProcedureCompletionSymbols()
+    {
+        foreach (var symbol in _symbolEntries.Where(entry => entry.Kind == "Story procedure"))
+        {
+            yield return new OsirisCompletionSymbol(
+                symbol.Name,
+                "Story procedure",
+                symbol.Signature,
+                symbol.DefinitionSummary);
+        }
+    }
+
+    private static void AttachIndentation(TextEditor editor)
+    {
+        editor.TextArea.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key != System.Windows.Input.Key.Enter ||
+                System.Windows.Input.Keyboard.Modifiers != System.Windows.Input.ModifierKeys.None)
+                return;
+
+            // Handle Enter before AvalonEdit inserts a plain newline.
+            e.Handled = true;
+            InsertIndentedNewLine(editor);
+        };
+    }
+
+    private static void InsertIndentedNewLine(TextEditor editor)
+    {
+        var document = editor.Document;
+        int caretOffset = editor.CaretOffset;
+        var line = document.GetLineByOffset(caretOffset);
+        string beforeCaret = document.GetText(line.Offset, caretOffset - line.Offset);
+        string indentation = new(beforeCaret.TakeWhile(c => c is ' ' or '\t').ToArray());
+        string content = beforeCaret.TrimStart(' ', '\t');
+
+        // Align a closing delimiter with its matching opening level before
+        // creating the next line (the usual editor behavior).
+        if (editor.SelectionLength == 0 && content.Length > 0 &&
+            content[0] == ')' && indentation.Length >= 4)
+        {
+            indentation = indentation[..^4];
+            document.Replace(line.Offset, beforeCaret.Length - content.Length, indentation);
+            caretOffset = editor.CaretOffset;
+            line = document.GetLineByOffset(caretOffset);
+            beforeCaret = document.GetText(line.Offset, caretOffset - line.Offset);
+        }
+
+        string trimmed = beforeCaret.TrimEnd();
+        if (string.Equals(trimmed.Trim(), "THEN", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.EndsWith('('))
+            indentation += "    ";
+
+        string insertion = Environment.NewLine + indentation;
+        int replaceStart = editor.SelectionStart;
+        int replaceLength = editor.SelectionLength;
+        document.Replace(replaceStart, replaceLength, insertion);
+        editor.CaretOffset = replaceStart + insertion.Length;
+    }
+
+    private void RestoreGoalScriptLayout()
+    {
+        try
+        {
+            if (!File.Exists(GoalScriptLayoutSettingsPath))
+                return;
+
+            double[]? weights = JsonSerializer.Deserialize<double[]>(
+                File.ReadAllText(GoalScriptLayoutSettingsPath));
+            if (weights is null || weights.Length != 3 ||
+                weights.Any(value => !double.IsFinite(value) || value <= 0))
+                return;
+
+            GoalScriptLayoutGrid.RowDefinitions[0].Height =
+                new GridLength(weights[0], GridUnitType.Star);
+            GoalScriptLayoutGrid.RowDefinitions[2].Height =
+                new GridLength(weights[1], GridUnitType.Star);
+            GoalScriptLayoutGrid.RowDefinitions[4].Height =
+                new GridLength(weights[2], GridUnitType.Star);
+        }
+        catch (Exception ex)
+        {
+            WriteGoalScriptLayoutLog("RESTORE ERROR: " + ex);
+        }
+    }
+
+    private void GoalScriptSplitter_DragCompleted(
+        object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
+    {
+        GoalScriptLayoutGrid.UpdateLayout();
+        SaveGoalScriptLayout();
+    }
+
+    private void SaveGoalScriptLayout()
+    {
+        if (!_goalScriptLayoutRestored)
+            return;
+
+        try
+        {
+            GoalScriptLayoutGrid.UpdateLayout();
+            double[] heights =
+            {
+                GoalScriptLayoutGrid.RowDefinitions[0].ActualHeight,
+                GoalScriptLayoutGrid.RowDefinitions[2].ActualHeight,
+                GoalScriptLayoutGrid.RowDefinitions[4].ActualHeight
+            };
+
+            if (heights.Any(value => !double.IsFinite(value) || value <= 0))
+            {
+                WriteGoalScriptLayoutLog("SAVE SKIPPED: invalid heights " +
+                    string.Join(", ", heights));
+                return;
+            }
+
+            double total = heights.Sum();
+            double[] weights = heights.Select(value => value / total * 100.0).ToArray();
+
+            string directory = Path.GetDirectoryName(GoalScriptLayoutSettingsPath)!;
+            Directory.CreateDirectory(directory);
+            string temporary = GoalScriptLayoutSettingsPath + ".tmp";
+            File.WriteAllText(temporary,
+                JsonSerializer.Serialize(weights, new JsonSerializerOptions { WriteIndented = true }),
+                new UTF8Encoding(false));
+            File.Move(temporary, GoalScriptLayoutSettingsPath, true);
+            WriteGoalScriptLayoutLog("SAVED heights=" + string.Join(", ", heights) +
+                "; weights=" + string.Join(", ", weights));
+        }
+        catch (Exception ex)
+        {
+            WriteGoalScriptLayoutLog("SAVE ERROR: " + ex);
+        }
+    }
+
+    private static void WriteGoalScriptLayoutLog(string message)
+    {
+        try
+        {
+            string directory = Path.GetDirectoryName(GoalScriptLayoutSettingsPath)!;
+            Directory.CreateDirectory(directory);
+            File.AppendAllText(Path.Combine(directory, "goal-script-layout.log"),
+                DateTime.Now.ToString("O") + " " + message + Environment.NewLine,
+                new UTF8Encoding(false));
+        }
+        catch
+        {
+            // Diagnostics must never interfere with editor use.
+        }
     }
 
     private void ConfigureGame_Click(object sender, RoutedEventArgs e)
@@ -203,8 +432,6 @@ public partial class MainWindow : Window
                 $"API declarations: {completed.Dump.Functions.Count(x => x.FunctionKind is 1 or 2 or 3 or 6 or 7):N0}\r\n" +
                 $"Goals: {completed.Result.GoalCount:N0}\r\n" +
                 $"Rules: {completed.Result.RuleCount:N0}\r\n" +
-                $"Inferred PROC prototypes: {completed.Result.InferredPrototypeCount:N0}\r\n" +
-                $"Inferred PROC parameters: {completed.Result.InferredParameterCount:N0}\r\n" +
                 "Original Story binary was not modified.";
             StatusText.Text = $"Decompiled {completed.Result.GoalCount:N0} Goals / {completed.Result.RuleCount:N0} rules";
         }
@@ -241,6 +468,13 @@ public partial class MainWindow : Window
         {
             _sourcePath = path;
             _source = File.ReadAllText(path);
+            _grammarValidationTimer.Stop();
+            _grammarValidationVersion++;
+            _grammarValidationResult = null;
+            _grammarValidationSource = null;
+            _grammarResultVersion = -1;
+            GrammarSummaryText.Text = "Grammar validation queued…";
+            GrammarDiagnosticsList.Items.Clear();
             _goalDependencyAnalysis = null;
             _goalDependencyAnalysisSource = null;
             _goalDependencyKbSnapshots.Clear();
@@ -271,6 +505,7 @@ public partial class MainWindow : Window
             StatusText.Text = $"Loaded {_catalog.Goals.Count:N0} Goals";
             if (GoalTree.Items.Count > 0 && GoalTree.Items[0] is TreeViewItem first)
                 first.IsSelected = true;
+            QueueGrammarValidation();
         }
         catch (Exception ex)
         {
@@ -481,6 +716,7 @@ public partial class MainWindow : Window
                 "Hierarchy validation: passed" + Environment.NewLine +
                 "Pending KB edits were retained in the working source." + Environment.NewLine +
                 "The source file on disk has not been modified.";
+            QueueGrammarValidation();
         }
         catch (Exception ex)
         {
@@ -651,6 +887,183 @@ public partial class MainWindow : Window
         BuildGoalDependencyExplorer();
         StatusText.Text = $"Goal {goal.Id} — {goal.Title}";
         BringGoalTreeItemIntoView(FindGoalTreeItem(goal.Id));
+    }
+
+    private void TrackLifecycleSectionEdit(TextEditor editor, SyntaxKind sectionKind)
+    {
+        if (_loadingSection || _source is null || _currentGoal is null) return;
+        var section = _currentGoal.Block.Children.FirstOrDefault(block => block.Kind == sectionKind);
+        if (section is null) return;
+
+        string original = _source.Substring(section.Start, section.Length);
+        if (string.Equals(editor.Text, original, StringComparison.Ordinal))
+            _edits.Remove(section.Start);
+        else
+            _edits[section.Start] = new EditedSection(section.Length, editor.Text);
+
+        SaveButton.IsEnabled = _edits.Count > 0 || _hasStructuralEdits;
+        StatusText.Text = _edits.Count == 0 && !_hasStructuralEdits ? "No unsaved changes" :
+            $"Unsaved edits: {_edits.Count} section(s)";
+        UpdateColorizer(editor, sectionKind == SyntaxKind.InitSection ? _initColorizer : _exitColorizer);
+        QueueGrammarValidation();
+    }
+
+    private void QueueGrammarValidation()
+    {
+        if (_source is null)
+            return;
+
+        _grammarValidationVersion++;
+        GrammarSummaryText.Text = "Grammar check queued…";
+        _grammarValidationTimer.Stop();
+        _grammarValidationTimer.Start();
+    }
+
+    private async void GrammarValidationTimer_Tick(object? sender, EventArgs e)
+    {
+        _grammarValidationTimer.Stop();
+        if (_source is null)
+            return;
+
+        if (_grammarValidationRunning)
+        {
+            _grammarValidationPending = true;
+            return;
+        }
+
+        _grammarValidationRunning = true;
+        int version = _grammarValidationVersion;
+        try
+        {
+            string sourceSnapshot = CreateUpdatedSource();
+            GrammarValidationResult result = await Task.Run(
+                () => new OsirisGrammarValidator().Validate(sourceSnapshot));
+
+            if (version == _grammarValidationVersion)
+            {
+                _grammarValidationResult = result;
+                _grammarValidationSource = sourceSnapshot;
+                _grammarResultVersion = version;
+                RefreshGrammarDiagnostics();
+            }
+        }
+        catch (Exception ex)
+        {
+            if (version == _grammarValidationVersion)
+            {
+                GrammarSummaryText.Text = "Grammar validation failed: " + ex.Message;
+                GrammarDiagnosticsList.Items.Clear();
+            }
+        }
+        finally
+        {
+            _grammarValidationRunning = false;
+        }
+
+        if (_grammarValidationPending || version != _grammarValidationVersion)
+        {
+            _grammarValidationPending = false;
+            _grammarValidationTimer.Stop();
+            _grammarValidationTimer.Start();
+        }
+    }
+
+    private void RefreshGrammarDiagnostics()
+    {
+        GrammarDiagnosticsList.Items.Clear();
+        if (_grammarValidationResult is null || _grammarValidationSource is null)
+            return;
+
+        var result = _grammarValidationResult;
+        GrammarSummaryText.Text =
+            $"{result.ErrorCount:N0} error(s), {result.WarningCount:N0} warning(s)  |  " +
+            $"{result.RuleCount:N0} rules, {result.ConditionCount:N0} conditions, " +
+            $"{result.ActionCount:N0} KB actions, {result.LifecycleStatementCount:N0} INIT/EXIT actions";
+
+        if (result.Diagnostics.Count == 0)
+        {
+            GrammarDiagnosticsList.Items.Add(new GrammarDiagnosticEntry(
+                "No grammar errors found. The source passed all currently implemented checks."));
+            return;
+        }
+
+        foreach (var diagnostic in result.Diagnostics.Take(500))
+        {
+            var (line, column) = GetSourceLineColumn(_grammarValidationSource, diagnostic.Position);
+            string severity = diagnostic.Severity.ToString().ToUpperInvariant();
+            GrammarDiagnosticsList.Items.Add(new GrammarDiagnosticEntry(
+                $"{severity}  {line}:{column}  [{diagnostic.Code}]  {diagnostic.Message}", diagnostic));
+        }
+
+        if (result.Diagnostics.Count > 500)
+            GrammarDiagnosticsList.Items.Add(new GrammarDiagnosticEntry(
+                $"… and {result.Diagnostics.Count - 500:N0} more diagnostics."));
+    }
+
+    private void GrammarDiagnosticsList_MouseDoubleClick(object sender,
+        System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (GrammarDiagnosticsList.SelectedItem is not GrammarDiagnosticEntry entry ||
+            entry.Diagnostic is null || _grammarValidationSource is null ||
+            _catalog is null)
+            return;
+
+        var diagnostic = entry.Diagnostic;
+        var tokens = Lexer.Tokenize(_grammarValidationSource);
+        var structure = new StructureParser().Parse(_grammarValidationSource, tokens);
+        var updatedCatalog = GoalCatalog.Build(structure.Blocks);
+        var updatedGoal = updatedCatalog.Goals.FirstOrDefault(goal =>
+            diagnostic.Position >= goal.Block.Start && diagnostic.Position <= goal.Block.End);
+        if (updatedGoal is null)
+            return;
+
+        var originalGoal = _catalog.Goals.FirstOrDefault(goal => goal.Id == updatedGoal.Id);
+        if (originalGoal is null)
+            return;
+
+        var treeItem = FindGoalTreeItem(originalGoal.Id);
+        if (treeItem is not null && !treeItem.IsSelected)
+            treeItem.IsSelected = true;
+
+        var section = updatedGoal.Block.Children.FirstOrDefault(block =>
+            diagnostic.Position >= block.Start && diagnostic.Position <= block.End);
+        TextEditor? editor = section?.Kind switch
+        {
+            SyntaxKind.InitSection => InitEditor,
+            SyntaxKind.KnowledgeBaseSection => KbEditor,
+            SyntaxKind.ExitSection => ExitEditor,
+            _ => null
+        };
+        if (editor is null || section is null)
+            return;
+
+        int localOffset = Math.Clamp(
+            diagnostic.Position - section.Start, 0, editor.Document.TextLength);
+        int selectionLength = Math.Min(
+            Math.Max(1, diagnostic.Length), editor.Document.TextLength - localOffset);
+
+        SectionTabs.SelectedIndex = 0;
+        editor.Focus();
+        editor.Select(localOffset, selectionLength);
+        editor.ScrollToLine(editor.Document.GetLineByOffset(localOffset).LineNumber);
+    }
+
+    private static (int Line, int Column) GetSourceLineColumn(string source, int position)
+    {
+        int end = Math.Clamp(position, 0, source.Length);
+        int line = 1;
+        int column = 1;
+        for (int i = 0; i < end; i++)
+        {
+            if (source[i] == '\n')
+            {
+                line++;
+                column = 1;
+            }
+            else if (source[i] != '\r')
+                column++;
+        }
+        return (line, column);
     }
 
     private void RebuildRuleList()
@@ -1380,13 +1793,6 @@ public partial class MainWindow : Window
         _symbolEntries.Clear();
         if (_source is null || _api is null) return;
 
-        var signaturePattern = new Regex(
-            @"^\s*(event|query|call|sysquery|syscall)\s+([A-Za-z_]\w*)\s*(\([^)]*\))",
-            RegexOptions.Multiline | RegexOptions.CultureInvariant);
-        var signatures = signaturePattern.Matches(_source).Cast<Match>()
-            .GroupBy(m => m.Groups[2].Value, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.First().Groups[3].Value, StringComparer.Ordinal);
-
         foreach (var pair in _api.Functions.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
         {
             string kind = pair.Value switch
@@ -1398,7 +1804,10 @@ public partial class MainWindow : Window
                 ApiSymbolKind.SystemCall => "System call",
                 _ => "API"
             };
-            AddSymbol(pair.Key, kind, signatures.TryGetValue(pair.Key, out var sig) ? sig : "(signature unavailable)");
+            string signature = _api.FunctionSignatures.TryGetValue(pair.Key, out var apiSignature)
+                ? FormatApiSignature(apiSignature)
+                : "(signature unavailable)";
+            AddSymbol(pair.Key, kind, signature);
         }
         foreach (string name in _api.Objects.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
             AddSymbol(name, "Object", "");
@@ -1423,9 +1832,7 @@ public partial class MainWindow : Window
             string[] records = GameDatabaseSymbolRecords.Entries.TryGetValue(name, out var found)
                 ? found
                 : Array.Empty<string>();
-            string apiSignature = signatures.TryGetValue(name, out var declaredSignature)
-                ? declaredSignature
-                : "";
+            _api.FunctionSignatures.TryGetValue(name, out var apiSignature);
             var display = BuildGameDatabaseSymbolDisplay(records, apiSignature);
             AddSymbol(name, "Game database symbol", display.Signature, display.Summary);
         }
@@ -1458,19 +1865,24 @@ public partial class MainWindow : Window
                 var procedureParse = new RuleParser().Parse(kbText, procedureTokens, procedureStructure.Blocks);
                 foreach (var rule in procedureParse.Rules)
                 {
-                    if (rule.Kind != RuleKind.Proc || rule.Conditions.Count == 0) continue;
-                    var firstCondition = rule.Conditions[0];
-                    var head = rule.Calls
-                        .Where(call => call.Start >= firstCondition.Start &&
-                            call.Start < firstCondition.Start + firstCondition.Length)
-                        .Where(call => call.Name.StartsWith("PROC_", StringComparison.OrdinalIgnoreCase))
-                        .OrderBy(call => call.Start)
-                        .FirstOrDefault();
-                    if (head is null) continue;
+                    // The procedure name and arguments are stored in the PROC
+                    // header by RuleParser; they are not a condition call and
+                    // do not need a PROC_ prefix.
+                    if (rule.Kind != RuleKind.Proc ||
+                        string.IsNullOrWhiteSpace(rule.ProcedureSignature))
+                        continue;
 
-                    if (!storyProcedures.TryGetValue(head.Name, out var definitions))
-                        storyProcedures[head.Name] = definitions = new();
-                    string signature = "(" + string.Join(", ", head.Arguments.Select(a => a.Text.Trim())) + ")";
+                    var headMatch = Regex.Match(
+                        rule.ProcedureSignature,
+                        @"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+                        RegexOptions.CultureInvariant);
+                    if (!headMatch.Success)
+                        continue;
+
+                    string procedureName = headMatch.Groups[1].Value;
+                    string signature = rule.ProcedureSignature[headMatch.Groups[1].Length..].TrimStart();
+                    if (!storyProcedures.TryGetValue(procedureName, out var definitions))
+                        storyProcedures[procedureName] = definitions = new();
                     definitions.Add((goal, rule.Start, rule.Length, signature));
                 }
             }
@@ -1525,8 +1937,12 @@ public partial class MainWindow : Window
         }
     }
 
+    private static string FormatApiSignature(ApiFunctionSignature signature) =>
+        "(" + string.Join(", ", signature.Parameters.Select((parameter, index) =>
+            $"[{parameter.Direction}]({parameter.Type})_Arg{index}")) + ")";
+
     private static (string Signature, string Summary) BuildGameDatabaseSymbolDisplay(
-        IReadOnlyList<string> records, string apiSignature)
+        IReadOnlyList<string> records, ApiFunctionSignature? apiSignature)
     {
         var typeNames = new Dictionary<int, string>
         {
@@ -1550,12 +1966,13 @@ public partial class MainWindow : Window
                 int.TryParse(code, out int value) && typeNames.TryGetValue(value, out string? type)
                     ? type : $"UNKNOWN_TYPE_{code}").ToArray();
             string signature = "(" + string.Join(", ", names) + ")";
-            string[] apiTypes = Regex.Matches(apiSignature, @"\[(?:in|out)\]\(([^)]+)\)", RegexOptions.IgnoreCase)
-                .Cast<Match>().Select(match => match.Groups[1].Value).ToArray();
-            bool matchesApi = apiTypes.Length == names.Length &&
+            string[] apiTypes = apiSignature?.Parameters.Select(parameter => parameter.Type).ToArray()
+                ?? Array.Empty<string>();
+            bool matchesApi = apiSignature is not null &&
+                apiTypes.Length == names.Length &&
                 apiTypes.SequenceEqual(names, StringComparer.OrdinalIgnoreCase);
-            string status = apiSignature.Length == 0
-                ? "no textual API declaration"
+            string status = apiSignature is null
+                ? "no typed API declaration"
                 : matchesApi ? "exact API type match" : "differs from API declaration";
             signatures.Add($"flag {flag}: {signature}");
             lines.Add($"  flag {flag}: {signature}  [{status}]  | raw valueTypes=[{rawCodes}]");
@@ -1564,7 +1981,7 @@ public partial class MainWindow : Window
         string signatureText = signatures.Count == 0
             ? "(DBase signature unavailable)"
             : string.Join("; ", signatures);
-        string apiText = apiSignature.Length == 0 ? "(none found)" : apiSignature;
+        string apiText = apiSignature is null ? "(none found)" : FormatApiSignature(apiSignature);
         string summary = "DBase descriptors:" + Environment.NewLine +
             string.Join(Environment.NewLine, lines) + Environment.NewLine +
             "Story.div API declaration: " + apiText + Environment.NewLine +
@@ -1814,7 +2231,10 @@ public partial class MainWindow : Window
         }
 
         string originalRuleText = KbEditor.Text.Substring(selected.Start, selected.Length);
-        var dialog = new RuleEditWindow(originalRuleText, selected.Rule.Kind, selected.Rule.Conditions, selected.Rule.Actions, selected.Rule.ProcedureSignature, selected.Start) { Owner = this };
+        var dialog = new RuleEditWindow(
+            originalRuleText, selected.Rule.Kind, selected.Rule.Conditions,
+            selected.Rule.Actions, selected.Rule.ProcedureSignature,
+            selected.Start, _api, GetProcedureCompletionSymbols) { Owner = this };
         if (dialog.ShowDialog() != true)
             return;
 
@@ -1889,8 +2309,37 @@ public partial class MainWindow : Window
         }
     }
 
-    private string Slice(SyntaxBlock? block) =>
-        block is null || _source is null ? "" : _source.Substring(block.Start, block.Length);
+    private string Slice(SyntaxBlock? block)
+    {
+        if (block is null || _source is null) return "";
+        return _edits.TryGetValue(block.Start, out var edit)
+            ? edit.Text
+            : _source.Substring(block.Start, block.Length);
+    }
+
+    private static IReadOnlyList<string> ValidateLifecycleActions(
+        string source,
+        StructureParseResult structure,
+        ApiSymbolCatalog api)
+    {
+        var diagnostics = new List<string>();
+        var catalog = GoalCatalog.Build(structure.Blocks);
+        var parser = new ActionListParser();
+        foreach (var goal in catalog.Goals)
+        {
+            foreach (var sectionKind in new[] { SyntaxKind.InitSection, SyntaxKind.ExitSection })
+            {
+                var section = goal.Block.Children.FirstOrDefault(block => block.Kind == sectionKind);
+                if (section is null) continue;
+                string sectionText = source.Substring(section.Start, section.Length);
+                var result = parser.Parse(sectionText, api);
+                string sectionName = sectionKind == SyntaxKind.InitSection ? "INIT" : "EXIT";
+                foreach (var diagnostic in result.Diagnostics)
+                    diagnostics.Add($"Goal {goal.Id} {sectionName}: {diagnostic.Message}");
+            }
+        }
+        return diagnostics;
+    }
 
     private void UpdateColorizer(TextEditor editor, OsirisColorizer colorizer)
     {
@@ -1938,11 +2387,14 @@ public partial class MainWindow : Window
             var tokens = Lexer.Tokenize(updated);
             var structure = new StructureParser().Parse(updated, tokens);
             var rules = new RuleParser().Parse(updated, tokens, structure.Blocks);
-            if (structure.Diagnostics.Count > 0 || rules.Diagnostics.Count > 0)
+            var lifecycleDiagnostics = ValidateLifecycleActions(
+                updated, structure, ApiSymbolCatalog.Build(updated));
+            if (structure.Diagnostics.Count > 0 || rules.Diagnostics.Count > 0 || lifecycleDiagnostics.Count > 0)
             {
                 OutputBox.Text = "Build refused: source parser diagnostics were reported.\r\n" +
                     string.Join("\r\n", structure.Diagnostics.Select(d => d.Message)
-                        .Concat(rules.Diagnostics.Select(d => d.Message)).Take(40));
+                        .Concat(rules.Diagnostics.Select(d => d.Message))
+                        .Concat(lifecycleDiagnostics).Take(40));
                 StatusText.Text = "Build blocked by source diagnostics";
                 return;
             }
@@ -2068,10 +2520,19 @@ public partial class MainWindow : Window
             .OrderByDescending(edit => edit.Start)
             .ToArray();
         int changedSectionCount = editSnapshot.Length;
+        int? selectedGoalId = _currentGoal?.Id;
 
         SaveButton.IsEnabled = false;
+        KbEditor.IsEnabled = false;
+        InitEditor.IsEnabled = false;
+        ExitEditor.IsEnabled = false;
+        GoalTree.IsEnabled = false;
+        NewGoalButton.IsEnabled = false;
+        OpenButton.IsEnabled = false;
+        DecompileButton.IsEnabled = false;
+        BuildButton.IsEnabled = false;
         StatusText.Text = "Preparing and validating Story.div in background...";
-        OutputBox.Text = "Building the saved source snapshot and validating all rules. The editor remains available.";
+        OutputBox.Text = "Building and validating the saved source snapshot. Editing is temporarily paused to protect the save.";
 
         try
         {
@@ -2089,10 +2550,14 @@ public partial class MainWindow : Window
                 var tokens = Lexer.Tokenize(updated);
                 var structure = new StructureParser().Parse(updated, tokens);
                 var rules = new RuleParser().Parse(updated, tokens, structure.Blocks);
+                var lifecycleDiagnostics = ValidateLifecycleActions(
+                    updated, structure, ApiSymbolCatalog.Build(updated));
                 string diagnostics = string.Join("\r\n",
                     structure.Diagnostics.Select(d => d.Message)
-                        .Concat(rules.Diagnostics.Select(d => d.Message)).Take(30));
-                return (Updated: updated, RuleCount: rules.Rules.Count, Diagnostics: diagnostics);
+                        .Concat(rules.Diagnostics.Select(d => d.Message))
+                        .Concat(lifecycleDiagnostics).Take(30));
+                return (Updated: updated, RuleCount: rules.Rules.Count,
+                    LifecycleDiagnosticCount: lifecycleDiagnostics.Count, Diagnostics: diagnostics);
             });
 
             if (!string.IsNullOrWhiteSpace(validation.Diagnostics))
@@ -2105,9 +2570,16 @@ public partial class MainWindow : Window
 
             await File.WriteAllTextAsync(dialog.FileName, validation.Updated,
                 new System.Text.UTF8Encoding(false));
+            LoadDocument(dialog.FileName);
+            if (selectedGoalId is int goalId)
+            {
+                var selectedItem = FindGoalTreeItem(goalId);
+                if (selectedItem is not null) selectedItem.IsSelected = true;
+            }
             OutputBox.Text = $"Saved separate source copy: {dialog.FileName}\r\n" +
-                $"Changed KB sections: {changedSectionCount}\r\n" +
-                $"Parsed rules: {validation.RuleCount:N0}\r\n" +
+                $"Changed sections (KB / INIT / EXIT): {changedSectionCount}\r\n" +
+                $"Parsed KB rules: {validation.RuleCount:N0}\r\n" +
+                "INIT/EXIT syntax and known API call signatures: passed\r\n" +
                 "Original source and game files were not modified.";
             _edits.Clear();
             _hasStructuralEdits = false;
@@ -2123,10 +2595,23 @@ public partial class MainWindow : Window
         }
         finally
         {
-            if (_edits.Count > 0 || _hasStructuralEdits)
-                SaveButton.IsEnabled = true;
+            KbEditor.IsEnabled = true;
+            InitEditor.IsEnabled = true;
+            ExitEditor.IsEnabled = true;
+            GoalTree.IsEnabled = true;
+            NewGoalButton.IsEnabled = _source is not null;
+            OpenButton.IsEnabled = true;
+            DecompileButton.IsEnabled = true;
+            BuildButton.IsEnabled = _source is not null;
+            SaveButton.IsEnabled = _edits.Count > 0 || _hasStructuralEdits;
         }
     }
+    private void Help_Click(object sender, RoutedEventArgs e)
+    {
+        var help = new HelpWindow { Owner = this };
+        help.ShowDialog();
+    }
+
     private static string NormalizeLineEndings(string text, string original)
     {
         string newline = original.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" :
