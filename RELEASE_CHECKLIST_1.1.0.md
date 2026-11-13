@@ -1,6 +1,6 @@
 ﻿# StoryEditor 1.1.0 release checklist
 
-Status: local release candidate prepared. No Git commit, push, tag, or GitHub Release has been created.
+Status: source commit and tag v1.1.0 are published to GitHub. The GitHub Release page and binary assets are still pending.
 
 ## Release contents
 
@@ -23,7 +23,7 @@ Status: local release candidate prepared. No Git commit, push, tag, or GitHub Re
 
 - Directory: `C:\\StoryEditor_Builds\\StoryEditor_1.1.0_20261113_publish`
 - Archive: `C:\\StoryEditor_Builds\\StoryEditor-1.1.0-win-x64.zip`
-- Archive SHA-256: `1AF946784B3D32D8A8FED0BFF4CF060AB231B4F4A3A53A4F67081535AAA7C6E0`
+- Archive SHA-256: `2214FA492A65106389ABE8F8B1BAB601325A6E7B21893925F2F17AF5CC7E1B03`
 - Executable SHA-256: `0F51199552AC03FBD7C963D856D32FB84CAFCA10FFC85C9C6D01EEE7CE6A7433`
 
 ## Maintainer verification before public announcement
@@ -38,6 +38,7 @@ Status: local release candidate prepared. No Git commit, push, tag, or GitHub Re
 
 ## Publication
 
-- [ ] Review final source changes and package contents.
-- [ ] Create commit and push only after explicit approval.
-- [ ] Create GitHub tag/release only after explicit approval.
+- [x] Review final source changes and package contents.
+- [x] Commit `ca674ce` and push `main` to `origin`.
+- [x] Create and push tag `v1.1.0`.
+- [ ] Create the GitHub Release for `v1.1.0` and upload the ZIP plus SHA-256 sidecar. The connected GitHub actions support reading releases but do not expose release creation or asset upload; complete this final step in the GitHub web interface.

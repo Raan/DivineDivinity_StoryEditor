@@ -6,7 +6,7 @@
 
 It combines a WPF editor, a binary Story decompiler, and a build workflow based on the original 32-bit OsirisDLL.dll from the user's own game installation.
 
-> **Status:** v1.1.0 is the current release. This version adds a live Osiris grammar validator, navigation from diagnostics, improved rule editing, editor assistance, and bilingual syntax help.
+> **Status:** v1.1.0 is tagged on GitHub. The Windows x64 package is prepared; the GitHub Release page and binary assets are pending publication.
 
 [Русская версия / Russian version](README.ru.md)
 
